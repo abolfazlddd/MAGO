@@ -50,8 +50,8 @@ export default function CartPage() {
       const p = products.find((x) => x.id === ci.productId);
       if (!p) return ci;
 
-      // Only enforce limits when tracking is enabled
-      if (p.track_stock === true) {
+      // Treat null/undefined as "tracking is ON" (safe default)
+      if (p.track_stock !== false) {
         const max = Math.max(0, p.stock_on_hand ?? 0);
         const clampedQty = Math.min(ci.qty, max);
 
@@ -107,7 +107,7 @@ export default function CartPage() {
     if (nextQty < 0) nextQty = 0;
 
     // If tracking stock, clamp to available stock
-    if (p && p.track_stock === true) {
+    if (p && p.track_stock !== false) {
       const max = Math.max(0, p.stock_on_hand ?? 0);
       if (nextQty > max) nextQty = max;
     }
@@ -135,7 +135,8 @@ export default function CartPage() {
         <>
           <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
             {rows.map((r) => {
-              const tracking = r.track_stock === true;
+              // Treat null/undefined as "tracking is ON" (safe default)
+              const tracking = r.track_stock !== false;
               const atMax = tracking && r.qty >= (r.stock_on_hand ?? 0);
 
               return (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { addToCart as addToCartWithQty, getMaxAddableQty, getQtyInCart } from "@/lib/cart";
 
 type Product = {
   id: string;
@@ -37,6 +38,10 @@ export default function Page() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [saleStatus, setSaleStatus] = useState<"open" | "closed">("open");
 
+  // Per-product UI state
+  const [qtyToAdd, setQtyToAdd] = useState<Record<string, number>>({});
+  const [feedback, setFeedback] = useState<Record<string, "idle" | "added" | "maxed">>({});
+
   useEffect(() => {
     setCart(loadCart());
 
@@ -62,13 +67,30 @@ export default function Page() {
 
   const cartCount = useMemo(() => cart.reduce((sum, i) => sum + i.qty, 0), [cart]);
 
-  function addToCart(productId: string) {
-    const next = [...cart];
-    const found = next.find((x) => x.productId === productId);
-    if (found) found.qty += 1;
-    else next.push({ productId, qty: 1 });
-    setCart(next);
-    saveCart(next);
+  function bumpQty(productId: string, delta: number, max: number) {
+    setQtyToAdd((prev) => {
+      const current = prev[productId] ?? 1;
+      const next = Math.max(1, Math.min(max, current + delta));
+      return { ...prev, [productId]: next };
+    });
+
+    // Longer-lived button state:
+    // keep "Added ✓" until the user changes the selector
+    setFeedback((prev) => ({ ...prev, [productId]: "idle" }));
+  }
+
+  function addProductToCart(product: Product) {
+    const desired = qtyToAdd[product.id] ?? 1;
+    const { next, added } = addToCartWithQty(cart, product, desired);
+
+    if (added > 0) {
+      setCart(next);
+      saveCart(next);
+      setFeedback((prev) => ({ ...prev, [product.id]: "added" }));
+    } else {
+      // User asked to add, but we couldn't add anything (usually stock maxed)
+      setFeedback((prev) => ({ ...prev, [product.id]: "maxed" }));
+    }
   }
 
   return (
@@ -109,7 +131,23 @@ export default function Page() {
         {products.map((p) => {
           // Treat null/undefined as "tracking is ON" (safe default)
           const trackStock = p.track_stock !== false;
-          const out = trackStock && p.stock_on_hand <= 0;
+          const inCart = getQtyInCart(cart, p.id);
+          const maxAddable = getMaxAddableQty(cart, p);
+          const out = trackStock && maxAddable <= 0;
+
+          const selectorMax = Number.isFinite(maxAddable) ? Math.max(1, maxAddable) : 99;
+          const selectedQtyRaw = qtyToAdd[p.id] ?? 1;
+          const selectedQty = Math.max(1, Math.min(selectorMax, selectedQtyRaw));
+          const status = feedback[p.id] ?? "idle";
+          const baseLabel = saleStatus === "closed" ? "Sale closed" : out ? "Out of stock" : "Add to cart";
+          const label =
+            saleStatus === "closed" || out
+              ? baseLabel
+              : status === "added"
+                ? "Added to cart ✓"
+                : status === "maxed"
+                  ? "No stock left"
+                  : baseLabel;
 
           return (
             <div key={p.id} style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
@@ -129,30 +167,50 @@ export default function Page() {
               <p style={{ marginTop: 8, fontWeight: 700 }}>{formatMoney(p.price_cents)}</p>
 
               <p
-  className={`mt-1 min-h-[22px] text-[color:var(--muted-foreground)] ${
-    trackStock ? "visible" : "invisible"
-  }`}
->
-  Stock: {p.stock_on_hand}
-</p>
+                className={`mt-1 min-h-[22px] text-[color:var(--muted-foreground)] ${
+                  trackStock ? "visible" : "invisible"
+                }`}
+              >
+                Stock: {p.stock_on_hand} {trackStock ? `(in cart: ${inCart})` : ""}
+              </p>
+
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => bumpQty(p.id, -1, selectorMax)}
+                  disabled={selectedQty <= 1}
+                  className="h-10 w-10 rounded-xl border font-extrabold transition disabled:opacity-40"
+                  aria-label={`Decrease ${p.name} quantity`}
+                >
+                  −
+                </button>
+
+                <div className="h-10 flex-1 rounded-xl border px-3 flex items-center justify-center font-extrabold">
+                  {selectedQty}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => bumpQty(p.id, +1, selectorMax)}
+                  disabled={trackStock && selectedQty >= selectorMax}
+                  className="h-10 w-10 rounded-xl border font-extrabold transition disabled:opacity-40"
+                  aria-label={`Increase ${p.name} quantity`}
+                >
+                  +
+                </button>
+              </div>
 
               <button
-                onClick={() => addToCart(p.id)}
+                onClick={() => addProductToCart(p)}
                 disabled={saleStatus === "closed" || out}
-                style={{
-                  marginTop: 10,
-                  width: "100%",
-                  padding: "12px 14px",
-                  borderRadius: 12,
-                  border: "1px solid transparent",
-                  background: saleStatus === "closed" || out ? "#e5e7eb" : "#111827",
-                  color: saleStatus === "closed" || out ? "#6b7280" : "#ffffff",
-                  cursor: saleStatus === "closed" || out ? "not-allowed" : "pointer",
-                  fontWeight: 800,
-                  boxShadow: saleStatus === "closed" || out ? "none" : "0 6px 18px rgba(17,24,39,0.18)",
-                }}
+                className={`mt-2 w-full rounded-xl px-4 py-3 font-extrabold transition-all duration-150 border
+                  ${
+                    saleStatus === "closed" || out
+                      ? "bg-gray-200 text-gray-500 cursor-not-allowed border-transparent"
+                      : "bg-slate-900 text-white border-slate-300 shadow-lg hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0"
+                  }`}
               >
-                {saleStatus === "closed" ? "Sale closed" : out ? "Out of stock" : "Add to cart"}
+                {label}
               </button>
             </div>
           );
