@@ -121,7 +121,7 @@ export default function AdminPage() {
       await loadSaleStatus();
 
       // 2) products (admin endpoint includes hidden)
-      const pRes = await fetch("/api/admin/products", {
+      const pRes = await fetch("/api/admin/products/list", {
         method: "GET",
         headers: { authorization: `Bearer ${authToken}` },
       });

@@ -48,28 +48,52 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const orders = (data ?? []).map((o: any) => ({
-      id: o.id,
-      status: o.status,
-      customer_name: o.customer_name,
-      customer_phone: o.customer_phone,
-      customer_address: o.customer_address,
-      notes: o.notes ?? "",
-      subtotal_cents: o.subtotal_cents ?? 0,
-      created_at: o.created_at,
-      order_items: (o.order_items ?? []).map((it: any) => {
-        const unit = Number(it.unit_price_cents ?? 0);
-        const qty = Number(it.qty ?? 0);
-        return {
-          id: it.id,
-          product_id: it.product?.id ?? null,
-          product_name: it.product_name ?? it.product?.name ?? "(Deleted product)",
-          qty,
-          unit_price_cents: unit,
-          line_total_cents: unit * qty,
-        };
-      }),
-    }));
+    const orders = (data ?? []).map((o: any) => {
+  const order_items = (o.order_items ?? []).map((it: any) => {
+    const unit = Number(it.unit_price_cents ?? 0);
+    const qty = Number(it.qty ?? 0);
+
+    return {
+      id: it.id,
+      product_id: it.product?.id ?? null,
+      product_name: it.product_name ?? it.product?.name ?? "(Deleted product)",
+      qty,
+      unit_price_cents: unit,
+      line_total_cents: unit * qty,
+
+      // (optional) keep these if your UI wants images
+      product_image_url: it.product_image_url ?? null,
+    };
+  });
+
+  // NEW: UI-friendly alias
+  const items = order_items.map((it: any) => ({
+    product_id: it.product_id,
+    product_name: it.product_name,
+    quantity: it.qty,
+    price_cents: it.unit_price_cents,
+  }));
+
+  const subtotal_cents = Number(o.subtotal_cents ?? 0);
+
+  return {
+    id: o.id,
+    status: o.status,
+    customer_name: o.customer_name,
+    customer_phone: o.customer_phone,
+    customer_address: o.customer_address,
+    notes: o.notes ?? "",
+    created_at: o.created_at,
+
+    // Existing fields (keep)
+    subtotal_cents,
+    order_items,
+
+    // NEW fields (add)
+    total_cents: subtotal_cents,
+    items,
+  };
+});
 
     return NextResponse.json({ orders });
   } catch (e: any) {
