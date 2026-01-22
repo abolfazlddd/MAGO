@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatAddress, isValidCanadianPostal, normalizeCanadianPostal } from "@/lib/address";
+import { successStyles } from "@/lib/checkoutSuccessStyles";
+import { HOLD_MINUTES } from "@/lib/hold";
+
 
 type Product = { id: string; name: string; price_cents: number };
 type CartItem = { productId: string; qty: number };
@@ -55,6 +58,7 @@ export default function CheckoutPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [remember, setRemember] = useState(true);
+   const [holdMinutes, setHoldMinutes] = useState(HOLD_MINUTES);
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -67,6 +71,17 @@ export default function CheckoutPage() {
   const [customerConfirmedEtransfer, setCustomerConfirmedEtransfer] = useState(false);
 
   const [result, setResult] = useState<any>(null);
+  useEffect(() => {
+  if (result) {
+    // Wait one frame so the DOM fully renders, then scroll
+    requestAnimationFrame(() => {
+      window.scrollTo({
+        top: document.body.scrollHeight,
+        behavior: "smooth",
+      });
+    });
+  }
+}, [result]);
   const [error, setError] = useState<string>("");
 
   const [reservationId, setReservationId] = useState<string>("");
@@ -171,10 +186,11 @@ const subtotal = useMemo(() => {
       setReservationId(data.reservationId);
       setExpiresAt(data.expiresAt);
       localStorage.setItem(ACTIVE_RES_ID_KEY, data.reservationId);
+      setHoldMinutes(Number(data.holdMinutes ?? HOLD_MINUTES));
 
       setReserving(false);
     };
-
+    
     reserve();
   }, [cart]);
 
@@ -303,7 +319,7 @@ const subtotal = useMemo(() => {
         </div>
       </header>
 
-      <p style={{ marginTop: 8 }}>After placing your order, you’ll pay by e-transfer.</p>
+      <p style={{ marginTop: 8 }}>Before placing your order, please pay subtotal below by e-transfer to: orphansmago@gmail.com</p>
 
       <div style={{ marginTop: 14, fontWeight: 800 }}>Subtotal: {formatMoney(subtotal)}</div>
 
@@ -321,10 +337,10 @@ const subtotal = useMemo(() => {
 
         <div style={{ marginTop: 6, color: "var(--muted-foreground)" }}>
           {reserving
-            ? "We’re holding your items for 8 minutes so they don’t get sold out while you checkout."
+            ? `We’re holding your items for ${holdMinutes} minutes so they don’t get sold out while you checkout.`
             : holdExpired
               ? "Your hold expired. Refresh this page to reserve again."
-              : `Time left: ${formatMMSS(secondsLeft)} (8-minute hold)`}
+              : `Time left: ${formatMMSS(secondsLeft)} (${holdMinutes}-minute hold)`}
         </div>
       </section>
 
@@ -454,14 +470,15 @@ const subtotal = useMemo(() => {
   <div style={{ fontWeight: 900 }}>Order ID</div>
 
   <code
-    style={{
-      padding: "6px 10px",
-      borderRadius: 10,
-      border: "1px solid rgba(0,0,0,0.12)",
-      background: "white",
-      fontWeight: 900,
-    }}
-  >
+  style={{
+    padding: "6px 10px",
+    borderRadius: 10,
+    border: "1px solid var(--border)",
+    background: "var(--card)",
+    color: "var(--foreground)",
+    fontWeight: 900,
+  }}
+>
     {result.publicOrderId}
   </code>
 
@@ -472,13 +489,14 @@ const subtotal = useMemo(() => {
       navigator.clipboard?.writeText(result.publicOrderId);
     }}
     style={{
-      padding: "8px 10px",
-      borderRadius: 10,
-      border: "1px solid rgba(0,0,0,0.14)",
-      background: "white",
-      fontWeight: 900,
-      cursor: "pointer",
-    }}
+  padding: "8px 10px",
+  borderRadius: 10,
+  border: "1px solid var(--border)",
+  background: "var(--button-bg)",
+  color: "var(--foreground)",
+  fontWeight: 900,
+  cursor: "pointer",
+}}
   >
     Copy ID
   </button>
@@ -487,17 +505,18 @@ const subtotal = useMemo(() => {
 
     {/* Next steps */}
     <div
-      style={{
-        marginTop: 14,
-        padding: 12,
-        borderRadius: 14,
-        border: "1px solid rgba(0,0,0,0.10)",
-        background: "white",
-      }}
-    >
+  style={{
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 14,
+    border: "1px solid var(--border)",
+    background: "var(--card)",
+    color: "var(--foreground)",
+  }}
+>
       <div style={{ fontWeight: 950, marginBottom: 8 }}>Next steps</div>
 
-      <ol style={{ margin: 0, paddingLeft: 18, color: "#111827", display: "grid", gap: 6 }}>
+      <ol style={{ margin: 0, paddingLeft: 18, color: "var(--foreground)", display: "grid", gap: 6 }}>
   <li>
     Send an e-transfer to <b>{result.etransfer?.email}</b>
   </li>
@@ -516,14 +535,15 @@ const subtotal = useMemo(() => {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ fontWeight: 800 }}>{result.etransfer?.name}</div>
           <code
-            style={{
-              padding: "6px 10px",
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.12)",
-              background: "rgba(0,0,0,0.02)",
-              fontWeight: 900,
-            }}
-          >
+  style={{
+    padding: "6px 10px",
+    borderRadius: 10,
+    border: "1px solid var(--border)",
+    background: "var(--card-2)",
+    color: "var(--foreground)",
+    fontWeight: 900,
+  }}
+>
             {result.etransfer?.email}
           </code>
 
@@ -535,13 +555,15 @@ const subtotal = useMemo(() => {
               navigator.clipboard?.writeText(email);
             }}
             style={{
-              padding: "8px 10px",
-              borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.14)",
-              background: "white",
-              fontWeight: 900,
-              cursor: "pointer",
-            }}
+  padding: "8px 10px",
+  borderRadius: 10,
+  border: "1px solid var(--border)",
+  background: "var(--button-bg)",
+  color: "var(--foreground)",
+  fontWeight: 900,
+  cursor: "pointer",
+}}
+
           >
             Copy email
           </button>
@@ -565,14 +587,14 @@ const subtotal = useMemo(() => {
       <button
         onClick={() => goBack("/")}
         style={{
-          padding: "10px 12px",
-          borderRadius: 12,
-          border: "1px solid rgba(0,0,0,0.14)",
-          background: "#111827",
-          color: "white",
-          fontWeight: 950,
-          cursor: "pointer",
-        }}
+  padding: "10px 12px",
+  borderRadius: 12,
+  border: "1px solid var(--border)",
+  background: "var(--foreground)",
+  color: "var(--background)",
+  fontWeight: 950,
+  cursor: "pointer",
+}}
       >
         Back to shop
       </button>

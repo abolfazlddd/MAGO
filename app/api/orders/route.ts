@@ -78,18 +78,21 @@ export async function POST(req: Request) {
 
     const etransferEmail = process.env.ETRANSFER_EMAIL || "";
     const etransferName = process.env.ETRANSFER_NAME || "";
-    const dollars = (Number(row.subtotal_cents ?? 0) / 100).toFixed(2);
+    // Compute dollars as before (keeps etransfer.message)
+const dollars = (Number(row.subtotal_cents ?? 0) / 100).toFixed(2);
 
-    return NextResponse.json({
-      orderId: row.order_id,
-      publicOrderId,
-      orderMonth: row.order_month,
-      orderNumber: row.order_number,
-      etransfer: {
-        email: etransferEmail,
-        message: `Order ${publicOrderId} - $${dollars} - ${name}`,
-      },
-    });
+return NextResponse.json({
+  orderId: row.order_id,
+  publicOrderId,
+  orderMonth: row.order_month,
+  orderNumber: row.order_number,
+  // <-- NEW: include numeric cents so client can reliably format
+  total_cents: Number(row.subtotal_cents ?? 0),
+  etransfer: {
+    email: etransferEmail,
+    message: `Order ${publicOrderId} - $${dollars} - ${name}`,
+  },
+});
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }

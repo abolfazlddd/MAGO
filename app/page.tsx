@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { addToCart as addToCartWithQty, getMaxAddableQty, getQtyInCart } from "@/lib/cart";
 import NextImage from "next/image";
 import { countCartItems } from "@/lib/cartCount";
@@ -43,6 +43,17 @@ export default function Page() {
   // Per-product UI state
   const [qtyToAdd, setQtyToAdd] = useState<Record<string, number>>({});
   const [feedback, setFeedback] = useState<Record<string, "idle" | "added" | "maxed">>({});
+  // Track timers per product so we can clear/reset them cleanly
+const feedbackTimers = useRef<Record<string, number>>({});
+useEffect(() => {
+  return () => {
+    // clear any outstanding timers on unmount
+    Object.values(feedbackTimers.current).forEach((id) => {
+      clearTimeout(id);
+    });
+    feedbackTimers.current = {};
+  };
+}, []);
 
   useEffect(() => {
     setCart(loadCart());
@@ -82,18 +93,40 @@ export default function Page() {
   }
 
   function addProductToCart(product: Product) {
-    const desired = qtyToAdd[product.id] ?? 1;
-    const { next, added } = addToCartWithQty(cart, product, desired);
+  const desired = qtyToAdd[product.id] ?? 1;
+  const { next, added } = addToCartWithQty(cart, product, desired);
 
-    if (added > 0) {
-      setCart(next);
-      saveCart(next);
-      setFeedback((prev) => ({ ...prev, [product.id]: "added" }));
-    } else {
-      // User asked to add, but we couldn't add anything (usually stock maxed)
-      setFeedback((prev) => ({ ...prev, [product.id]: "maxed" }));
+  if (added > 0) {
+    setCart(next);
+    saveCart(next);
+
+    // Set the "added" feedback
+    setFeedback((prev) => ({ ...prev, [product.id]: "added" }));
+
+    // Clear any existing timer for this product
+    const existing = feedbackTimers.current[product.id];
+    if (existing) {
+      clearTimeout(existing);
     }
+
+    // After a short delay, revert feedback back to "idle"
+    const timerId = window.setTimeout(() => {
+      setFeedback((prev) => {
+        // guard: only reset if still currently "added"
+        if (prev[product.id] === "added") {
+          return { ...prev, [product.id]: "idle" };
+        }
+        return prev;
+      });
+      delete feedbackTimers.current[product.id];
+    }, 3500); // 3.5s confirmation
+
+    feedbackTimers.current[product.id] = timerId;
+  } else {
+    // User asked to add, but we couldn't add anything (usually stock maxed)
+    setFeedback((prev) => ({ ...prev, [product.id]: "maxed" }));
   }
+}
 
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", padding: 16, fontFamily: "system-ui" }}>
@@ -110,6 +143,22 @@ export default function Page() {
   <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>MAGO Mehr Kitchen</h1>
 </div>
 <a
+onMouseEnter={(e) => {
+  e.currentTarget.style.transform = "translateY(-2px)";
+  e.currentTarget.style.boxShadow = "0 16px 40px rgba(0,0,0,0.25)";
+}}
+onMouseLeave={(e) => {
+  e.currentTarget.style.transform = "translateY(0)";
+  e.currentTarget.style.boxShadow = "0 12px 32px rgba(0,0,0,0.18)";
+}}
+onMouseDown={(e) => {
+  e.currentTarget.style.transform = "translateY(0)";
+  e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.22)";
+}}
+onMouseUp={(e) => {
+  e.currentTarget.style.transform = "translateY(-2px)";
+  e.currentTarget.style.boxShadow = "0 16px 40px rgba(0,0,0,0.25)";
+}}
   href="/cart"
   aria-label={cartCount > 0 ? `Open cart (${cartCount} items)` : "Open cart"}
   style={{
@@ -131,7 +180,9 @@ export default function Page() {
     fontWeight: 900,
 
     // extra: subtle lift so it feels tappable + separated from content
-    boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+    boxShadow: "0 12px 32px rgba(0,0,0,0.18)",
+transition: "transform 140ms ease, box-shadow 140ms ease",
+willChange: "transform",
 
     // extra: avoid iOS home indicator overlap
     marginBottom: "env(safe-area-inset-bottom)",
@@ -139,8 +190,8 @@ export default function Page() {
 >
   <span
     style={{
-      width: 28,
-      height: 28,
+      width: 40,
+      height:48,
       display: "inline-flex",
       alignItems: "center",
       justifyContent: "center",
@@ -151,7 +202,7 @@ export default function Page() {
       flex: "0 0 auto",
     }}
   >
-    <img src="/cart-icon.png" alt="" style={{ width: 22, height: 22 }} />
+    <img src="/cart-icon.png" alt="" style={{ width: 32, height: 32 }} />
   </span>
 
   <span style={{ lineHeight: 1 }}>Cart</span>
@@ -170,7 +221,7 @@ export default function Page() {
         justifyContent: "center",
         background: "#111827",
         color: "white",
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 900,
       }}
     >

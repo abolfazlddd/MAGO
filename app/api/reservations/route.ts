@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { HOLD_MINUTES } from "@/lib/hold";
 
 type RpcReserveCartRow = {
   reservation_id: string;
@@ -41,7 +42,7 @@ export async function POST(req: Request) {
     if (!token) return NextResponse.json({ error: "Missing token." }, { status: 400 });
     if (items.length === 0) return NextResponse.json({ error: "Cart is empty." }, { status: 400 });
 
-    const holdMinutes = 8;
+    const holdMinutes = HOLD_MINUTES;
 
     const { data, error } = await supabaseAdmin
       .rpc("reserve_cart", {
