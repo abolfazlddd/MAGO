@@ -70,26 +70,41 @@ export default function CheckoutPage() {
   const [notes, setNotes] = useState("");
   const [customerConfirmedEtransfer, setCustomerConfirmedEtransfer] = useState(false);
 
-  const [result, setResult] = useState<any>(null);
-  useEffect(() => {
+const [result, setResult] = useState<any>(null);
+const [error, setError] = useState<string>("");
+
+const errorRef = useRef<HTMLDivElement | null>(null);
+// Reservation / hold state (you were missing these)
+const [reservationId, setReservationId] = useState<string>("");
+const [expiresAt, setExpiresAt] = useState<string>("");
+const [secondsLeft, setSecondsLeft] = useState<number>(0);
+const [reserving, setReserving] = useState<boolean>(true);
+
+// Countdown interval ref (you were missing this too)
+const timerRef = useRef<number | null>(null);
+
+useEffect(() => {
   if (result) {
-    // Wait one frame so the DOM fully renders, then scroll
+    // Success: scroll to bottom (order placed panel)
     requestAnimationFrame(() => {
       window.scrollTo({
         top: document.body.scrollHeight,
         behavior: "smooth",
       });
     });
+    return;
   }
-}, [result]);
-  const [error, setError] = useState<string>("");
 
-  const [reservationId, setReservationId] = useState<string>("");
-  const [expiresAt, setExpiresAt] = useState<string>("");
-  const [secondsLeft, setSecondsLeft] = useState<number>(0);
-  const [reserving, setReserving] = useState<boolean>(true);
-
-  const timerRef = useRef<number | null>(null);
+  if (error) {
+    // Error: scroll to the error message so user actually sees it
+    requestAnimationFrame(() => {
+      errorRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    });
+  }
+}, [result, error]);
 
   useEffect(() => {
   setCart(loadCart());
@@ -238,7 +253,7 @@ const subtotal = useMemo(() => {
     }
 
     if (holdExpired) {
-      setError("Your 8-minute hold expired. Please refresh checkout to reserve again.");
+      setError(`Your ${holdMinutes}-minute hold expired. Please refresh checkout to reserve again.`);
       return;
     }
 
@@ -426,7 +441,19 @@ const subtotal = useMemo(() => {
           {reserving ? "Reserving…" : holdExpired ? "Hold expired" : "Place order"}
         </button>
 
-        {error ? <div style={{ color: "var(--danger)" }}>{error}</div> : null}
+        {error ? (
+  <div
+    ref={errorRef}
+    style={{
+      color: "var(--danger)",
+      marginTop: 10,
+      scrollMarginTop: 24, // nice spacing when scrolling
+      fontWeight: 700,
+    }}
+  >
+    {error}
+  </div>
+) : null}
 
         {result ? (
   <div
