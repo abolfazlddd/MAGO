@@ -13,6 +13,8 @@ type Product = {
 type CartItem = { productId: string; qty: number };
 
 const CART_KEY = "mago_cart";
+const RES_TOKEN_KEY = "mago_reservation_token";
+const ACTIVE_RES_ID_KEY = "mago_active_reservation_id";
 
 function formatMoney(cents: number) {
   return `$${(cents / 100).toFixed(2)}`;
@@ -30,48 +32,41 @@ function saveCart(cart: CartItem[]) {
   localStorage.setItem(CART_KEY, JSON.stringify(cart));
 }
 
+function ensureReservationToken() {
+  const existing = localStorage.getItem(RES_TOKEN_KEY);
+  if (existing && existing.trim()) return existing.trim();
+  const token = crypto.randomUUID();
+  localStorage.setItem(RES_TOKEN_KEY, token);
+  return token;
+}
+
 export default function CartPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
 
+  // ✅ If user left checkout with a hold, cancel it when they return to cart
+  useEffect(() => {
+    const rid = localStorage.getItem(ACTIVE_RES_ID_KEY) || "";
+    if (!rid) return;
+
+    const token = ensureReservationToken();
+    fetch("/api/reservations/cancel", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reservationId: rid, token }),
+    }).finally(() => {
+      localStorage.removeItem(ACTIVE_RES_ID_KEY);
+    });
+  }, []);
+
   useEffect(() => {
     setCart(loadCart());
-    fetch("/api/products")
+    fetch("/api/products", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => setProducts((d.products || []) as Product[]));
   }, []);
-  useEffect(() => {
-  if (products.length === 0 || cart.length === 0) return;
-
-  let changed = false;
-
-  const next = cart
-    .map((ci) => {
-      const p = products.find((x) => x.id === ci.productId);
-      if (!p) return ci;
-
-      // Treat null/undefined as "tracking is ON" (safe default)
-      if (p.track_stock !== false) {
-        const max = Math.max(0, p.stock_on_hand ?? 0);
-        const clampedQty = Math.min(ci.qty, max);
-
-        if (clampedQty !== ci.qty) changed = true;
-
-        return { ...ci, qty: clampedQty };
-      }
-
-      return ci;
-    })
-    .filter((ci) => ci.qty > 0);
-
-  if (changed) {
-    setCart(next);
-    saveCart(next);
-  }
-}, [products]); // run after products load/refresh
 
   const rows = useMemo(() => {
-    // Build a lookup map for faster access
     const byId = new Map(products.map((p) => [p.id, p]));
 
     return cart
@@ -79,7 +74,6 @@ export default function CartPage() {
         const p = byId.get(ci.productId);
         if (!p) return null;
 
-        // Return a row that includes cart qty + product fields we need
         return {
           productId: ci.productId,
           qty: ci.qty,
@@ -93,24 +87,14 @@ export default function CartPage() {
       .filter(Boolean) as Array<CartItem & Product>;
   }, [cart, products]);
 
-  const subtotal = useMemo(
-    () => rows.reduce((sum, r) => sum + r.price_cents * r.qty, 0),
-    [rows]
-  );
+  const subtotal = useMemo(() => rows.reduce((sum, r) => sum + r.price_cents * r.qty, 0), [rows]);
 
   function setQty(productId: string, qty: number) {
-    const p = products.find((x) => x.id === productId);
-
     let nextQty = qty;
 
-    // Clamp to [0, ...]
+    // Do NOT clamp to stock automatically (stock can be 0 due to holds)
+    if (!Number.isFinite(nextQty)) nextQty = 0;
     if (nextQty < 0) nextQty = 0;
-
-    // If tracking stock, clamp to available stock
-    if (p && p.track_stock !== false) {
-      const max = Math.max(0, p.stock_on_hand ?? 0);
-      if (nextQty > max) nextQty = max;
-    }
 
     const next = cart
       .map((x) => (x.productId === productId ? { ...x, qty: nextQty } : x))
@@ -135,9 +119,10 @@ export default function CartPage() {
         <>
           <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
             {rows.map((r) => {
-              // Treat null/undefined as "tracking is ON" (safe default)
               const tracking = r.track_stock !== false;
-              const atMax = tracking && r.qty >= (r.stock_on_hand ?? 0);
+              const availableNow = tracking ? Math.max(0, r.stock_on_hand ?? 0) : Infinity;
+              const canIncrease = !tracking || r.qty < availableNow;
+              const exceedsAvailable = tracking && r.qty > availableNow;
 
               return (
                 <div
@@ -155,9 +140,17 @@ export default function CartPage() {
                     <div style={{ fontWeight: 800 }}>{r.name}</div>
                     <div style={{ color: "var(--muted-foreground)" }}>{formatMoney(r.price_cents)}</div>
 
-                    {/* Only show stock if tracking is enabled */}
                     {tracking ? (
-                      <div style={{ color: "var(--muted-foreground)" }}>Stock: {r.stock_on_hand}</div>
+                      <div style={{ color: "var(--muted-foreground)" }}>Stock available now: {availableNow}</div>
+                    ) : (
+                      <div style={{ color: "var(--muted-foreground)" }}>Stock not tracked</div>
+                    )}
+
+                    {exceedsAvailable ? (
+                      <div style={{ marginTop: 6, color: "var(--danger)" }}>
+                        This item is currently out of stock (or reserved in checkout). You may need to reduce quantity
+                        before checkout.
+                      </div>
                     ) : null}
                   </div>
 
@@ -171,8 +164,8 @@ export default function CartPage() {
                     <button
                       onClick={() => setQty(r.productId, r.qty + 1)}
                       style={{ padding: "6px 10px" }}
-                      disabled={atMax}
-                      title={atMax ? "No more stock available" : "Increase quantity"}
+                      disabled={!canIncrease}
+                      title={!canIncrease ? "No more stock available right now" : "Increase quantity"}
                     >
                       +
                     </button>

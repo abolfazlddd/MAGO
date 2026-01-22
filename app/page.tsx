@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { addToCart as addToCartWithQty, getMaxAddableQty, getQtyInCart } from "@/lib/cart";
+import NextImage from "next/image";
+import { countCartItems } from "@/lib/cartCount";
 
 type Product = {
   id: string;
@@ -46,7 +48,7 @@ export default function Page() {
     setCart(loadCart());
 
     // Load products
-    fetch("/api/products")
+    fetch("/api/products", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => setProducts(d.products || []));
 
@@ -65,7 +67,7 @@ export default function Page() {
     return () => clearInterval(t);
   }, []);
 
-  const cartCount = useMemo(() => cart.reduce((sum, i) => sum + i.qty, 0), [cart]);
+  const cartCount = useMemo(() => countCartItems(cart), [cart]);
 
   function bumpQty(productId: string, delta: number, max: number) {
     setQtyToAdd((prev) => {
@@ -96,10 +98,86 @@ export default function Page() {
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", padding: 16, fontFamily: "system-ui" }}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700 }}>MAGO Charity Shop</h1>
-        <a href="/cart" style={{ textDecoration: "underline" }}>
-          Cart ({cartCount})
-        </a>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+  <NextImage
+  src="/mago-logo.png"
+  alt="MAGO"
+  width={60}
+  height={60}
+  priority
+  style={{ borderRadius: 10, objectFit: "contain" }}
+/>
+  <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>MAGO Mehr Kitchen</h1>
+</div>
+<a
+  href="/cart"
+  aria-label={cartCount > 0 ? `Open cart (${cartCount} items)` : "Open cart"}
+  style={{
+    position: "fixed",
+    right: 16,
+    bottom: 16,
+    zIndex: 50,
+
+    // original cart button styling (unchanged)
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "10px 12px",
+    borderRadius: 999,
+    border: "1px solid var(--border)",
+    background: "var(--background)",
+    textDecoration: "none",
+    color: "inherit",
+    fontWeight: 900,
+
+    // extra: subtle lift so it feels tappable + separated from content
+    boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+
+    // extra: avoid iOS home indicator overlap
+    marginBottom: "env(safe-area-inset-bottom)",
+  }}
+>
+  <span
+    style={{
+      width: 28,
+      height: 28,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 999,
+      overflow: "hidden",
+      background: "rgba(0,0,0,0.03)",
+      border: "1px solid rgba(0,0,0,0.08)",
+      flex: "0 0 auto",
+    }}
+  >
+    <img src="/cart-icon.png" alt="" style={{ width: 22, height: 22 }} />
+  </span>
+
+  <span style={{ lineHeight: 1 }}>Cart</span>
+
+  {cartCount > 0 ? (
+    <span
+      aria-label={`Cart items: ${cartCount}`}
+      style={{
+        marginLeft: 2,
+        minWidth: 22,
+        height: 22,
+        padding: "0 7px",
+        borderRadius: 999,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#111827",
+        color: "white",
+        fontSize: 12,
+        fontWeight: 900,
+      }}
+    >
+      {cartCount}
+    </span>
+  ) : null}
+</a>
       </header>
 
       {saleStatus === "closed" && (
@@ -117,7 +195,7 @@ export default function Page() {
       )}
 
       <p style={{ marginTop: 8, color: "var(--muted-foreground)" }}>
-        Pickup only. Pay by e-transfer after placing your order.
+        Please pay by e-transfer before placing your order. Instructions on the checkout page.
       </p>
 
       <div
@@ -134,6 +212,11 @@ export default function Page() {
           const inCart = getQtyInCart(cart, p.id);
           const maxAddable = getMaxAddableQty(cart, p);
           const out = trackStock && maxAddable <= 0;
+
+          // UX: only show qty selector when user can actually add items.
+          // - If the sale is closed, hide it.
+          // - If the item is out of stock (when stock is tracked), hide it.
+          const canSelectQty = saleStatus === "open" && !out;
 
           const selectorMax = Number.isFinite(maxAddable) ? Math.max(1, maxAddable) : 99;
           const selectedQtyRaw = qtyToAdd[p.id] ?? 1;
@@ -166,39 +249,38 @@ export default function Page() {
               <p style={{ color: "var(--muted-foreground)", marginTop: 4 }}>{p.description}</p>
               <p style={{ marginTop: 8, fontWeight: 700 }}>{formatMoney(p.price_cents)}</p>
 
-              <p
-                className={`mt-1 min-h-[22px] text-[color:var(--muted-foreground)] ${
-                  trackStock ? "visible" : "invisible"
-                }`}
-              >
-                Stock: {p.stock_on_hand} {trackStock ? `(in cart: ${inCart})` : ""}
+              <p className="mt-1 min-h-[22px] text-[color:var(--muted-foreground)]">
+                {trackStock ? `Stock: ${p.stock_on_hand} • ` : ""}
+                In cart: {inCart}
               </p>
 
-              <div className="mt-2 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => bumpQty(p.id, -1, selectorMax)}
-                  disabled={selectedQty <= 1}
-                  className="h-10 w-10 rounded-xl border font-extrabold transition disabled:opacity-40"
-                  aria-label={`Decrease ${p.name} quantity`}
-                >
-                  −
-                </button>
+              {canSelectQty && (
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => bumpQty(p.id, -1, selectorMax)}
+                    disabled={selectedQty <= 1}
+                    className="h-10 w-10 rounded-xl border font-extrabold transition disabled:opacity-40"
+                    aria-label={`Decrease ${p.name} quantity`}
+                  >
+                    −
+                  </button>
 
-                <div className="h-10 flex-1 rounded-xl border px-3 flex items-center justify-center font-extrabold">
-                  {selectedQty}
+                  <div className="h-10 flex-1 rounded-xl border px-3 flex items-center justify-center font-extrabold">
+                    {selectedQty}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => bumpQty(p.id, +1, selectorMax)}
+                    disabled={trackStock && selectedQty >= selectorMax}
+                    className="h-10 w-10 rounded-xl border font-extrabold transition disabled:opacity-40"
+                    aria-label={`Increase ${p.name} quantity`}
+                  >
+                    +
+                  </button>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => bumpQty(p.id, +1, selectorMax)}
-                  disabled={trackStock && selectedQty >= selectorMax}
-                  className="h-10 w-10 rounded-xl border font-extrabold transition disabled:opacity-40"
-                  aria-label={`Increase ${p.name} quantity`}
-                >
-                  +
-                </button>
-              </div>
+              )}
 
               <button
                 onClick={() => addProductToCart(p)}
