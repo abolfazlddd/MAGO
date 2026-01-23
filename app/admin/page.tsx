@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { filterOrders, ordersToCsv } from "@/lib/orderFilters";
 import { buildPackingSlipHtml } from "@/lib/packingSlip";
+import { resolveProductImageUrl } from "@/lib/adminImage";
 
 
 type SaleStatus = "open" | "closed";
@@ -85,6 +86,7 @@ export default function AdminPage() {
   const [newStock, setNewStock] = useState<number>(10);
   const [newTrackStock, setNewTrackStock] = useState<boolean>(true);
   const [newImageFile, setNewImageFile] = useState<File | null>(null);
+  const [newImageUrl, setNewImageUrl] = useState<string>("");
   const [createSuccess, setCreateSuccess] = useState<boolean>(false);
   // ✅ Section collapse/expand (accordion)
 const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -101,6 +103,7 @@ function toggleSection(key: keyof typeof openSections) {
 
   // Inline edit (one at a time)
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [editImageFile, setEditImageFile] = useState<File | null>(null);
   const [productDraft, setProductDraft] = useState<{
     name: string;
     description: string;
@@ -406,7 +409,18 @@ const priceCents = Math.round(dollars * 100);
         return;
       }
 
-      const imageUrl = await uploadImageIfNeeded(newImageFile);
+      let imageUrl: string | null = null;
+try {
+  imageUrl = await resolveProductImageUrl({
+    file: newImageFile,
+    url: newImageUrl,
+    upload: uploadImageIfNeeded,
+    strategy: "exclusive", // create: force user to pick ONE
+  });
+} catch (e: any) {
+  setError(e?.message || "Choose either an image upload OR an image URL.");
+  return;
+}
 
       const res = await fetch("/api/admin/products", {
         method: "POST",
@@ -441,6 +455,7 @@ setNewPriceDollars("5.00");
 setNewStock(10);
 setNewTrackStock(true);
 setNewImageFile(null);
+setNewImageUrl("");
 
 await loadAll(token);
     } finally {
@@ -449,8 +464,9 @@ await loadAll(token);
   }
 
   function startEditingProduct(p: Product) {
-    setEditingProductId(p.id);
-    setProductDraft({
+  setEditingProductId(p.id);
+  setEditImageFile(null);
+  setProductDraft({
       name: p.name || "",
       description: p.description || "",
       price_cents: p.price_cents ?? 0,
@@ -461,9 +477,10 @@ await loadAll(token);
   }
 
   function cancelEditingProduct() {
-    setEditingProductId(null);
-    setProductDraft(null);
-  }
+  setEditingProductId(null);
+  setProductDraft(null);
+  setEditImageFile(null);
+}
 
   async function updateProduct(id: string, patch: Partial<Product>) {
     setError("");
@@ -527,14 +544,27 @@ await loadAll(token);
       }
     }
 
-    await updateProduct(id, {
-      name: productDraft.name.trim(),
-      description: productDraft.description.trim() || null,
-      price_cents: Number(productDraft.price_cents),
-      track_stock: productDraft.track_stock,
-      stock_on_hand: productDraft.track_stock ? Number(productDraft.stock_on_hand) : 0,
-      image_url: productDraft.image_url.trim() || null,
-    } as any);
+    let finalImageUrl: string | null = null;
+try {
+  finalImageUrl = await resolveProductImageUrl({
+    file: editImageFile,
+    url: productDraft.image_url,
+    upload: uploadImageIfNeeded,
+    strategy: "prefer-file", // edit: file wins
+  });
+} catch (e: any) {
+  setError(e?.message || "Invalid image settings.");
+  return;
+}
+
+await updateProduct(id, {
+  name: productDraft.name.trim(),
+  description: productDraft.description.trim() || null,
+  price_cents: Number(productDraft.price_cents),
+  track_stock: productDraft.track_stock,
+  stock_on_hand: productDraft.track_stock ? Number(productDraft.stock_on_hand) : 0,
+  image_url: finalImageUrl,
+} as any);
 
     cancelEditingProduct();
   }
@@ -769,10 +799,12 @@ const sectionBodyStyle: React.CSSProperties = {
 const collapseBtnStyle: React.CSSProperties = {
   padding: "6px 10px",
   borderRadius: 999,
-  border: "1px solid rgba(0,0,0,0.14)",
-  background: "white",
+  border: "1px solid var(--border)",
+  background: "var(--card)",
+  color: "var(--foreground)",
   fontWeight: 900,
   cursor: "pointer",
+  transition: "filter 120ms ease, transform 120ms ease",
 };
 
   if (!loggedIn) {
@@ -791,9 +823,33 @@ const collapseBtnStyle: React.CSSProperties = {
             type="password"
             style={{ padding: 10, borderRadius: 10, border: "1px solid var(--input)", minWidth: 260 }}
           />
-          <button onClick={handleLogin} style={{ padding: "10px 14px", fontWeight: 900 }}>
-            Log in
-          </button>
+          <button
+  onClick={handleLogin}
+  style={{
+    padding: "12px 16px",
+    borderRadius: 12,
+    border: "1px solid rgba(0,0,0,0.18)",
+    background: "#111827",
+    color: "white",
+    fontWeight: 900,
+    cursor: "pointer",
+    boxShadow: "0 1px 0 rgba(0,0,0,0.06)",
+    transition: "transform 120ms ease, filter 120ms ease, box-shadow 120ms ease",
+  }}
+  onMouseEnter={(e) => {
+    e.currentTarget.style.filter = "brightness(1.08)";
+    e.currentTarget.style.boxShadow = "0 6px 18px rgba(0,0,0,0.12)";
+  }}
+  onMouseLeave={(e) => {
+    e.currentTarget.style.filter = "none";
+    e.currentTarget.style.boxShadow = "0 1px 0 rgba(0,0,0,0.06)";
+    e.currentTarget.style.transform = "scale(1)";
+  }}
+  onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.98)")}
+  onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
+>
+  Log in
+</button>
         </div>
       </main>
     );
@@ -993,6 +1049,19 @@ const collapseBtnStyle: React.CSSProperties = {
             {newImageFile ? `Selected: ${newImageFile.name}` : "No image selected"}
           </div>
         </div>
+        <label>
+  Image URL (optional)
+  <input
+    value={newImageUrl}
+    onChange={(e) => setNewImageUrl(e.target.value)}
+    placeholder="https://example.com/image.jpg"
+    style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--input)" }}
+  />
+</label>
+
+<div style={{ color: "var(--muted-foreground)", fontSize: 12 }}>
+  Use <b>either</b> upload <b>or</b> URL (not both).
+</div>
 
         <button
           onClick={() => void createProduct()}
@@ -1129,14 +1198,64 @@ const collapseBtnStyle: React.CSSProperties = {
                       </label>
                     ) : null}
 
-                    <label>
-                      Image URL (optional)
-                      <input
-                        value={productDraft.image_url}
-                        onChange={(e) => setProductDraft({ ...productDraft, image_url: e.target.value })}
-                        style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--input)" }}
-                      />
-                    </label>
+                    <div style={{ display: "grid", gap: 6 }}>
+  <div style={{ fontWeight: 800 }}>Image (optional)</div>
+
+  <label
+    style={{
+      padding: "10px 12px",
+      borderRadius: 12,
+      border: "1px solid rgba(0,0,0,0.14)",
+      background: "white",
+      color: "#111827",
+      fontWeight: 800,
+      cursor: "pointer",
+      width: "fit-content",
+      userSelect: "none",
+      transition: "transform 120ms ease, filter 120ms ease",
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 10,
+    }}
+    onMouseEnter={(e) => (e.currentTarget.style.filter = "brightness(0.98)")}
+    onMouseLeave={(e) => (e.currentTarget.style.filter = "none")}
+    onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.98)")}
+    onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
+  >
+    📎 Choose image
+    <input
+      type="file"
+      accept="image/*"
+      style={{ display: "none" }}
+      onChange={(e) => setEditImageFile(e.target.files?.[0] || null)}
+    />
+  </label>
+
+  <div style={{ color: "var(--muted-foreground)", fontSize: 13 }}>
+    {editImageFile ? `Selected: ${editImageFile.name} (will replace URL)` : "No new upload selected"}
+  </div>
+
+  <label>
+    Image URL
+    <input
+      value={productDraft.image_url}
+      onChange={(e) => setProductDraft({ ...productDraft, image_url: e.target.value })}
+      placeholder="https://example.com/image.jpg"
+      style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--input)" }}
+    />
+  </label>
+
+  <button
+    type="button"
+    onClick={() => {
+      setEditImageFile(null);
+      setProductDraft({ ...productDraft, image_url: "" });
+    }}
+    style={{ color: "crimson", fontWeight: 900, width: "fit-content" }}
+  >
+    Remove image
+  </button>
+</div>
 
                     <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                       <button onClick={() => void saveEditingProduct()} style={{ fontWeight: 900 }}>
@@ -1162,9 +1281,20 @@ const collapseBtnStyle: React.CSSProperties = {
       <div style={{ color: "var(--muted-foreground)", fontWeight: 800, fontSize: 13 }}>
         Showing {visibleOrders.length} / {orders.length}
       </div>
-      <button style={collapseBtnStyle} onClick={() => toggleSection("orders")} type="button">
-        {openSections.orders ? "Hide" : "Show"}
-      </button>
+      <button
+  style={collapseBtnStyle}
+  onClick={() => toggleSection("orders")}
+  type="button"
+  onMouseEnter={(e) => (e.currentTarget.style.filter = "brightness(1.06)")}
+  onMouseLeave={(e) => {
+    e.currentTarget.style.filter = "none";
+    e.currentTarget.style.transform = "scale(1)";
+  }}
+  onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.98)")}
+  onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
+>
+  {openSections.orders ? "Hide" : "Show"}
+</button>
     </div>
   </div>
 
@@ -1364,7 +1494,8 @@ const collapseBtnStyle: React.CSSProperties = {
                         padding: "2px 8px",
                         borderRadius: 999,
                         border: "1px solid var(--border)",
-                        background: "white",
+                        background: "var(--card)",
+    color: "var(--foreground)",
                         fontSize: 12,
                         fontWeight: 900,
                       }}
@@ -1390,7 +1521,8 @@ const collapseBtnStyle: React.CSSProperties = {
                         padding: "2px 8px",
                         borderRadius: 999,
                         border: "1px solid var(--border)",
-                        background: "white",
+                        background: "var(--card)",
+    color: "var(--foreground)",
                         fontSize: 12,
                         fontWeight: 900,
                       }}
